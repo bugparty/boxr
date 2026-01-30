@@ -53,6 +53,12 @@
             
             # Shell
             bashInteractive
+
+            # Audio
+            portaudio
+            openal
+            alsaLib
+            zlib
             
             # X11 extensions
             xorg.libxcb
