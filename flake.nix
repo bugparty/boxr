@@ -58,6 +58,10 @@
             xorg.libxcb
             xorg.libXext
             xorg.libXrandr
+            
+            # Vulkan dependencies
+            glm
+            shaderc
           ];
 
           shellHook = ''
