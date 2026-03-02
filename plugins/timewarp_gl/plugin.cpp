@@ -50,6 +50,7 @@ const record_header mtp_record{"mtp_record",
                                    {"iteration_no", typeid(std::size_t)},
                                    {"vsync", typeid(time_point)},
                                    {"imu_to_display", typeid(std::chrono::nanoseconds)},
+                                   {"cam_vio_to_display", typeid(std::chrono::nanoseconds)},
                                    {"predict_to_display", typeid(std::chrono::nanoseconds)},
                                    {"render_to_display", typeid(std::chrono::nanoseconds)},
                                }};
@@ -851,9 +852,13 @@ public:
                                   {iteration_no},
                                   {_m_clock->now()},
                                   {imu_to_display},
+                                  {cam_vio_to_display},
                                   {predict_to_display},
                                   {render_to_display},
                               }});
+
+        // Force flush MTP records to ensure they're written
+        mtp_logger.flush();
 
     #ifndef NDEBUG // Timewarp only has vsync estimates if we're running with native-gl
 
