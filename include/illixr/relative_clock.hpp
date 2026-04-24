@@ -119,10 +119,30 @@ public:
     }
 
     /**
+     * @brief Get the Unix timestamp (nanoseconds since epoch) of the clock start time.
+     *
+     * This can be used to convert relative time_points to absolute Unix timestamps.
+     */
+    [[nodiscard]] int64_t unix_start_ns() const {
+        return _m_unix_start_ns;
+    }
+
+    /**
+     * @brief Convert a relative time_point to Unix timestamp in nanoseconds.
+     */
+    [[nodiscard]] int64_t to_unix_ns(time_point relative) const {
+        return _m_unix_start_ns + std::chrono::nanoseconds{relative.time_since_epoch()}.count();
+    }
+
+    /**
      * @brief Starts the clock. All times are relative to this point.
      */
     void start() {
         _m_start = std::chrono::steady_clock::now();
+        // Record Unix timestamp of start time using system_clock
+        _m_unix_start_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
     }
 
     /**
@@ -141,6 +161,7 @@ public:
 
 private:
     std::chrono::steady_clock::time_point _m_start;
+    int64_t _m_unix_start_ns{0};  ///< Unix timestamp (ns) when clock was started
 };
 
 using duration = RelativeClock::duration;

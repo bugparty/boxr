@@ -27,6 +27,7 @@
 #include "illixr/phonebook.hpp"
 #include "illixr/pose_prediction.hpp"
 #include "illixr/relative_clock.hpp"
+#include "illixr/rl_data_logger.hpp"
 #include "illixr/shader_util.hpp"
 #include "illixr/switchboard.hpp"
 #include "illixr/threadloop.hpp"
@@ -53,7 +54,44 @@ const record_header mtp_record{"mtp_record",
                                    {"cam_vio_to_display", typeid(std::chrono::nanoseconds)},
                                    {"predict_to_display", typeid(std::chrono::nanoseconds)},
                                    {"render_to_display", typeid(std::chrono::nanoseconds)},
+                                   {"unix_start_ns", typeid(std::int64_t)},  ///< Unix timestamp when clock started
                                }};
+
+// Extended record for RL training - includes timing, frequency, and temperature
+const record_header rl_frame_record{"rl_frame_record",
+                                    {
+                                        // Basic info
+                                        {"iteration_no", typeid(std::size_t)},
+                                        {"vsync", typeid(time_point)},
+
+                                        // Latency metrics (nanoseconds)
+                                        {"imu_to_display", typeid(std::chrono::nanoseconds)},
+                                        {"cam_vio_to_display", typeid(std::chrono::nanoseconds)},
+                                        {"predict_to_display", typeid(std::chrono::nanoseconds)},
+                                        {"render_to_display", typeid(std::chrono::nanoseconds)},
+
+                                        // Frame timing
+                                        {"frame_start_time", typeid(time_point)},
+                                        {"frame_end_time", typeid(time_point)},
+
+                                        // Pipeline stage timing - Render (SRR)
+                                        {"render_start_time", typeid(time_point)},
+                                        {"render_end_time", typeid(time_point)},
+
+                                        // Pipeline stage timing - Timewarp (ATW)
+                                        {"timewarp_start_time", typeid(time_point)},
+                                        {"timewarp_end_time", typeid(time_point)},
+
+                                        // Pipeline stage timing - VIO
+                                        {"vio_start_time", typeid(time_point)},
+                                        {"vio_end_time", typeid(time_point)},
+
+                                        // System state
+                                        {"cpu_freq_khz", typeid(std::uint64_t)},
+                                        {"gpu_freq_khz", typeid(std::uint64_t)},
+                                        {"cpu_temp_c", typeid(double)},
+                                        {"gpu_temp_c", typeid(double)},
+                                    }};
 
 #ifdef ILLIXR_MONADO
 typedef plugin timewarp_type;
@@ -88,6 +126,7 @@ public:
         , _m_signal_quad{sb->get_writer<signal_to_quad>("signal_quad")}
 #endif
         , timewarp_gpu_logger{record_logger_}
+        , rl_frame_logger{record_logger_}
         , _m_hologram{sb->get_writer<hologram_input>("hologram_in")} 
         , _m_signal_gldemo_finished{sb->get_reader<signal_to_gldemo_finished>("signal_to_gldemo_finished")} {
         spdlogger(std::getenv("TIMEWARP_GL_LOG_LEVEL"));
@@ -235,6 +274,9 @@ private:
 #endif
 
     record_coalescer timewarp_gpu_logger;
+
+    // Logger for RL training data
+    record_coalescer rl_frame_logger;
 
     // Switchboard plug for sending hologram calls
     switchboard::writer<hologram_input> _m_hologram;
@@ -688,6 +730,9 @@ public:
     }
 
     void warp(switchboard::ptr<const rendered_frame> most_recent_frame) {
+        // Record frame start time for RL training
+        time_point frame_start_time = _m_clock->now();
+
         if (!rendering_ready)
         {
 // <RTEN>
@@ -847,6 +892,13 @@ public:
         std::chrono::nanoseconds predict_to_display = _m_clock->now() - predict_time;
         std::chrono::nanoseconds render_to_display  = _m_clock->now() - render_time;
 
+        // Record frame end time
+        time_point frame_end_time = _m_clock->now();
+
+        // Read system state (CPU/GPU frequency and temperature)
+        SystemStateReader::SystemState sys_state = SystemStateReader::read_system_state();
+
+        // Log original mtp_record for backward compatibility
         mtp_logger.log(record{mtp_record,
                               {
                                   {iteration_no},
@@ -855,10 +907,48 @@ public:
                                   {cam_vio_to_display},
                                   {predict_to_display},
                                   {render_to_display},
+                                  {_m_clock->unix_start_ns()},  ///< Unix timestamp when clock started
                               }});
 
-        // Force flush MTP records to ensure they're written
+        // Log extended rl_frame_record for RL training
+        rl_frame_logger.log(record{rl_frame_record,
+                                    {
+                                        // Basic info
+                                        {iteration_no},
+                                        {_m_clock->now()},
+
+                                        // Latency metrics
+                                        {imu_to_display},
+                                        {cam_vio_to_display},
+                                        {predict_to_display},
+                                        {render_to_display},
+
+                                        // Frame timing
+                                        {frame_start_time},
+                                        {frame_end_time},
+
+                                        // Render timing (from rendered_frame)
+                                        {most_recent_frame->render_start_time},
+                                        {most_recent_frame->render_time},
+
+                                        // Timewarp timing (gpu_start_wall_time is timewarp start)
+                                        {gpu_start_wall_time},
+                                        {frame_end_time},
+
+                                        // VIO timing (from fast_pose_type in rendered_frame)
+                                        {most_recent_frame->render_pose.vio_start_time},
+                                        {most_recent_frame->render_pose.vio_end_time},
+
+                                        // System state
+                                        {sys_state.cpu_freq_khz},
+                                        {sys_state.gpu_freq_khz},
+                                        {sys_state.cpu_temp_c},
+                                        {sys_state.gpu_temp_c},
+                                    }});
+
+        // Force flush records to ensure they're written
         mtp_logger.flush();
+        rl_frame_logger.flush();
 
     #ifndef NDEBUG // Timewarp only has vsync estimates if we're running with native-gl
 
