@@ -90,11 +90,13 @@ public:
 #ifndef NDEBUG
             spdlog::get("illixr")->debug("[POSEPREDICTION] FAST POSE IS SLOW POSE!");
 #endif
-            // No imu_raw, return slow_pose
+            // No imu_raw, return slow_pose with VIO timing
             return fast_pose_type{
                 .pose                  = correct_pose(*slow_pose),
                 .predict_computed_time = _m_clock->now(),
                 .predict_target_time   = future_timestamp,
+                .vio_start_time        = slow_pose->vio_start_time,
+                .vio_end_time          = slow_pose->vio_end_time,
             };
         }
 
@@ -115,6 +117,10 @@ public:
                           Eigen::Quaternionf{static_cast<float>(state_plus(3)), static_cast<float>(state_plus(0)),
                                              static_cast<float>(state_plus(1)), static_cast<float>(state_plus(2))}});
 
+        // Copy VIO timing from slow_pose to predicted_pose
+        predicted_pose.vio_start_time = slow_pose->vio_start_time;
+        predicted_pose.vio_end_time = slow_pose->vio_end_time;
+
         // Make the first valid fast pose be straight ahead.
         if (first_time) {
             std::unique_lock lock{offset_mutex};
@@ -129,7 +135,8 @@ public:
         //       - the prediction compute time (time when this prediction was computed, i.e., now)
         //       - the prediction target (the time that was requested for this pose.)
         return fast_pose_type{
-            .pose = predicted_pose, .predict_computed_time = _m_clock->now(), .predict_target_time = future_timestamp};
+            .pose = predicted_pose, .predict_computed_time = _m_clock->now(), .predict_target_time = future_timestamp,
+            .vio_start_time = slow_pose->vio_start_time, .vio_end_time = slow_pose->vio_end_time};
     }
 
     void set_offset(const Eigen::Quaternionf& raw_o_times_offset) override {

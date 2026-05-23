@@ -106,6 +106,10 @@ struct pose_type : public switchboard::event {
     Eigen::Vector3f    position;
     Eigen::Quaternionf orientation;
 
+    // RL training: VIO timing information
+    time_point         vio_start_time{}; // Time when VIO processing started
+    time_point         vio_end_time{};   // Time when VIO processing finished
+
     pose_type()
         : sensor_time{time_point{}}
         , position{Eigen::Vector3f{0, 0, 0}}
@@ -121,6 +125,10 @@ typedef struct {
     pose_type  pose;
     time_point predict_computed_time; // Time at which the prediction was computed
     time_point predict_target_time;   // Time that prediction targeted.
+
+    // RL training: VIO timing information
+    time_point vio_start_time{};      // Time when VIO processing started
+    time_point vio_end_time{};        // Time when VIO processing finished
 } fast_pose_type;
 
 // Used to identify which graphics API is being used (for swapchain construction)
@@ -188,6 +196,9 @@ struct rendered_frame : public switchboard::event {
     time_point            sample_time{};
     time_point            render_time{};
 
+    // RL training: Render timing information
+    time_point            render_start_time{}; // Time when rendering started
+
     rendered_frame() = default;
 
     rendered_frame(std::array<GLuint, 2>&& swapchain_indices_, std::array<GLuint, 2>&& swap_indices_,
@@ -197,6 +208,15 @@ struct rendered_frame : public switchboard::event {
         , render_pose(std::move(render_pose_))
         , sample_time(sample_time_)
         , render_time(render_time_) { }
+
+    rendered_frame(std::array<GLuint, 2>&& swapchain_indices_, std::array<GLuint, 2>&& swap_indices_,
+                   fast_pose_type render_pose_, time_point sample_time_, time_point render_time_, time_point render_start_time_)
+        : swapchain_indices{swapchain_indices_}
+        , swap_indices{swap_indices_}
+        , render_pose(std::move(render_pose_))
+        , sample_time(sample_time_)
+        , render_time(render_time_)
+        , render_start_time(render_start_time_) { }
 };
 
 struct hologram_input : public switchboard::event {

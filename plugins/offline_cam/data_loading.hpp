@@ -65,7 +65,8 @@ static std::map<ullong, sensor_types> load_data() {
     const std::string cam0_subpath = "/cam0/data.csv";
     std::ifstream     cam0_file{illixr_data + cam0_subpath};
     if (!cam0_file.good()) {
-        spdlog::get("illixr")->error("[offline_cam] ${ILLIXR_DATA} {0} ({1}{0}) is not a good path", cam0_subpath, illixr_data);
+        spdlog::get("illixr")->error("[offline_cam] $ILLIXR_DATA{} ({}{}) is not a good path", cam0_subpath, illixr_data,
+                                     cam0_subpath);
         ILLIXR::abort();
     }
     for (CSVIterator row{cam0_file, 1}; row != CSVIterator{}; ++row) {
@@ -76,7 +77,8 @@ static std::map<ullong, sensor_types> load_data() {
     const std::string cam1_subpath = "/cam1/data.csv";
     std::ifstream     cam1_file{illixr_data + cam1_subpath};
     if (!cam1_file.good()) {
-        spdlog::get("illixr")->error("[offline_cam] ${ILLIXR_DATA} {0} ({1}{0}) is not a good path", cam1_subpath, illixr_data);
+        spdlog::get("illixr")->error("[offline_cam] $ILLIXR_DATA{} ({}{}) is not a good path", cam1_subpath, illixr_data,
+                                     cam1_subpath);
         ILLIXR::abort();
     }
     for (CSVIterator row{cam1_file, 1}; row != CSVIterator{}; ++row) {

@@ -4,6 +4,8 @@
 #include "illixr/error_util.hpp"
 #include "illixr/global_module_defs.hpp"
 #include "illixr/record_logger.hpp"
+#include "illixr/realtime_metrics.hpp"
+#include "illixr/shm_ring_buffer.hpp"
 #include "sqlite3pp/sqlite3pp.hpp"
 
 #include <filesystem>
@@ -51,6 +53,10 @@ public:
             create_table_string += rh.get_column_name(i) + std::string{" "};
             if (false) {
             } else if (rh.get_column_type(i) == typeid(std::size_t)) {
+                create_table_string += std::string{"INTEGER"};
+            } else if (rh.get_column_type(i) == typeid(std::int64_t)) {
+                create_table_string += std::string{"INTEGER"};
+            } else if (rh.get_column_type(i) == typeid(std::uint64_t)) {
                 create_table_string += std::string{"INTEGER"};
             } else if (rh.get_column_type(i) == typeid(bool)) {
                 create_table_string += std::string{"INTEGER"};
@@ -144,6 +150,10 @@ public:
                 if (false) {
                 } else if (rh.get_column_type(j) == typeid(std::size_t)) {
                     cmd.bind(j + 1, static_cast<long long>(r.get_value<std::size_t>(j)));
+                } else if (rh.get_column_type(j) == typeid(std::int64_t)) {
+                    cmd.bind(j + 1, static_cast<long long>(r.get_value<std::int64_t>(j)));
+                } else if (rh.get_column_type(j) == typeid(std::uint64_t)) {
+                    cmd.bind(j + 1, static_cast<long long>(r.get_value<std::uint64_t>(j)));
                 } else if (rh.get_column_type(j) == typeid(bool)) {
                     cmd.bind(j + 1, static_cast<long long>(r.get_value<bool>(j)));
                 } else if (rh.get_column_type(j) == typeid(double)) {
@@ -205,6 +215,65 @@ private:
 
 const std::filesystem::path sqlite_thread::dir{"metrics"};
 
+class realtime_metrics_exporter {
+public:
+    static std::int64_t to_ns_time_point(time_point t) {
+        return std::chrono::duration_cast<realtime_duration>(t.time_since_epoch()).count();
+    }
+
+    void export_record(const record& r) {
+        if (r.get_record_header().get_name() != "rl_frame_record") {
+            return;
+        }
+
+        if (!ring_buffer_.ok()) {
+            if (!warned_ring_buffer_not_ok_.exchange(true)) {
+                auto logger = spdlog::get("illixr");
+                if (logger) {
+                    logger->warn("[realtime_metrics_exporter] SHM buffer {} is not available; rl_frame_record export is disabled",
+                                 REALTIME_METRICS_SHM_NAME);
+                }
+            }
+            return;
+        }
+
+        try {
+            realtime_frame_metrics metrics{};
+            metrics.iteration_no          = r.get_value<std::size_t>(0);
+            metrics.vsync_ns              = to_ns_time_point(r.get_value<time_point>(1));
+            metrics.imu_to_display_ns     = to_ns(r.get_value<duration>(2));
+            metrics.cam_vio_to_display_ns = to_ns(r.get_value<duration>(3));
+            metrics.predict_to_display_ns = to_ns(r.get_value<duration>(4));
+            metrics.render_to_display_ns  = to_ns(r.get_value<duration>(5));
+            metrics.fps_hz                = r.get_value<double>(6);
+            metrics.frame_start_time_ns   = to_ns_time_point(r.get_value<time_point>(7));
+            metrics.frame_end_time_ns     = to_ns_time_point(r.get_value<time_point>(8));
+            metrics.render_start_time_ns  = to_ns_time_point(r.get_value<time_point>(9));
+            metrics.render_end_time_ns    = to_ns_time_point(r.get_value<time_point>(10));
+            metrics.timewarp_start_time_ns = to_ns_time_point(r.get_value<time_point>(11));
+            metrics.timewarp_end_time_ns   = to_ns_time_point(r.get_value<time_point>(12));
+            metrics.vio_start_time_ns      = to_ns_time_point(r.get_value<time_point>(13));
+            metrics.vio_end_time_ns        = to_ns_time_point(r.get_value<time_point>(14));
+            ring_buffer_.push(metrics);
+        } catch (const std::exception& e) {
+            auto logger = spdlog::get("illixr");
+            if (logger) {
+                logger->warn("[realtime_metrics_exporter] Failed to export rl_frame_record: {}", e.what());
+            }
+        }
+    }
+
+    void export_records(const std::vector<record>& rs) {
+        for (const record& r : rs) {
+            export_record(r);
+        }
+    }
+
+private:
+    shm_metrics_ring_buffer ring_buffer_{};
+    std::atomic<bool>       warned_ring_buffer_not_ok_{false};
+};
+
 class sqlite_record_logger : public record_logger {
 private:
     sqlite_thread& get_sqlite_thread(const record& r) {
@@ -224,17 +293,20 @@ private:
 protected:
     virtual void log(const std::vector<record>& r) override {
         if (!r.empty()) {
+            realtime_exporter_.export_records(r);
             get_sqlite_thread(r[0]).put_queue(r);
         }
     }
 
     virtual void log(const record& r) override {
+        realtime_exporter_.export_record(r);
         get_sqlite_thread(r).put_queue(r);
     }
 
 private:
     std::unordered_map<std::size_t, sqlite_thread> registered_tables;
     std::shared_mutex                              _m_registry_lock;
+    realtime_metrics_exporter                      realtime_exporter_;
 };
 
 } // namespace ILLIXR

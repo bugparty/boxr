@@ -129,6 +129,20 @@ set(ENV{PKG_CONFIG_PATH} "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig:${CMAKE_INSTALL_
 link_directories(BEFORE ${CMAKE_INSTALL_PREFIX}/lib ${CMAKE_INSTALL_PREFIX}/lib64)
 include_directories(BEFORE ${CMAKE_SOURCE_DIR}/include)
 
+set(RINGBUFFER_CANDIDATES
+    "${CMAKE_SOURCE_DIR}/../scheduler/ringbuffer"
+    "${CMAKE_SOURCE_DIR}/../powermonitor/build/_deps/ringbuffer-src"
+    "${CMAKE_SOURCE_DIR}/../powermonitor/build_linux/_deps/ringbuffer-src"
+    "${CMAKE_SOURCE_DIR}/../powermonitor/cmake-build-debug/_deps/ringbuffer-src"
+)
+
+foreach(candidate ${RINGBUFFER_CANDIDATES})
+    if(EXISTS "${candidate}/spsc_ring_buffer.hpp")
+        include_directories(BEFORE "${candidate}")
+        break()
+    endif()
+endforeach()
+
 find_package(PkgConfig REQUIRED)
 
 if("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")

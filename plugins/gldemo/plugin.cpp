@@ -163,13 +163,16 @@ public:
 
     void _p_one_iteration() override {
         // Essentially, XRWaitFrame.
-        spdlog::get(name)->debug("<RTEN> gldemo begin before vsync: {}", 
+        spdlog::get(name)->debug("<RTEN> gldemo begin before vsync: {}",
                                 duration2double<std::milli>(_m_clock->now().time_since_epoch()));
         wait_vsync();
+
+        // Record render start time for RL training (must be outside NDEBUG)
+        time_point time_before_render = _m_clock->now();
+
 #ifndef NDEBUG
         // <RTEN>
-        [[maybe_unused]] time_point time_before_render = _m_clock->now();
-        spdlog::get(name)->debug("<RTEN> gldemo begin after vsync: {}", 
+        spdlog::get(name)->debug("<RTEN> gldemo begin after vsync: {}",
                                 duration2double<std::milli>(_m_clock->now().time_since_epoch()));
         _m_signal_to_gldemo_finished.put(_m_signal_to_gldemo_finished.allocate<signal_to_gldemo_finished>(signal_to_gldemo_finished{false}));
         // <RTEN/>
@@ -293,7 +296,7 @@ public:
             // `allocate<rendered_frame>(...)` _should_ forward the arguments to rendered_frame's constructor, but I guess
             // not.
             std::array<GLuint, 2>{0, 0}, std::array<GLuint, 2>{which_buffer, which_buffer}, fast_pose,
-            fast_pose.predict_computed_time, lastTime}));
+            fast_pose.predict_computed_time, lastTime, time_before_render}));
 
         which_buffer = !which_buffer;
 

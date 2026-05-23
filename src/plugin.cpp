@@ -52,6 +52,7 @@ int ILLIXR::run(const cxxopts::ParseResult& options) {
     GET_BOOL(alignment_enable, ILLIXR_ALIGNMENT_ENABLE)
     GET_BOOL(enable_verbose_errors, ILLIXR_ENABLE_VERBOSE_ERRORS)
     GET_BOOL(enable_pre_sleep, ILLIXR_ENABLE_PRE_SLEEP)
+    GET_STRING(vio_cpu, VIO_CPU)
     GET_STRING(realsense_cam, REALSENSE_CAM)
 
     setenv("__GL_MaxFramesAllowed", "1", false);
@@ -93,8 +94,18 @@ int ILLIXR::run(const cxxopts::ParseResult& options) {
         plugins.push_back(visualizers[0]);
 
     if (config["install_prefix"]) {
-        std::string temp_path(getenv("LD_LIBRARY_PATH"));
-        temp_path = config["install_prefix"].as<std::string>() + ":" + temp_path;
+        const std::string install_prefix = config["install_prefix"].as<std::string>();
+        std::string       temp_path      = install_prefix + "/lib";
+
+        if (access((install_prefix + "/lib64").c_str(), F_OK) == 0) {
+            temp_path += ":" + install_prefix + "/lib64";
+        }
+
+        if (const char* ld_library_path = getenv("LD_LIBRARY_PATH");
+            ld_library_path != nullptr && ld_library_path[0] != '\0') {
+            temp_path += ":" + std::string{ld_library_path};
+        }
+
         setenv("LD_LIBRARY_PATH", temp_path.c_str(), true);
     }
 

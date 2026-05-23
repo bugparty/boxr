@@ -1,5 +1,6 @@
 #include "illixr/plugin.hpp"
 
+#include "illixr/cpu_affinity.hpp"
 #include "illixr/data_format.hpp"
 #include "illixr/phonebook.hpp"
 #include "illixr/switchboard.hpp"
@@ -34,6 +35,9 @@ public:
         , _m_imu_integrator_input{sb->get_reader<imu_integrator_input>("imu_integrator_input")}
         , _m_imu_raw{sb->get_writer<imu_raw_type>("imu_raw")} {
         spdlogger(std::getenv("GTSAM_INTEGRATOR_LOG_LEVEL"));
+        if (const char* vio_cpu_env = std::getenv("VIO_CPU")) {
+            _vio_cpu_core = std::stoi(vio_cpu_env);
+        }
         sb->schedule<imu_type>(id, "imu", [&](const switchboard::ptr<const imu_type>& datum, size_t) {
             callback(datum);
         });
@@ -57,6 +61,13 @@ public:
     }
 
     void callback(const switchboard::ptr<const imu_type>& datum) {
+        if (_vio_cpu_core >= 0 && !_affinity_set) {
+            if (set_cpu_affinity(_vio_cpu_core)) {
+                spdlog::get(name)->info("Pinned to CPU core {}", _vio_cpu_core);
+            }
+            _affinity_set = true;
+        }
+
         _imu_vec.emplace_back(datum->time, datum->angular_v.cast<double>(), datum->linear_a.cast<double>());
 
         clean_imu_vec(datum->time);
@@ -80,6 +91,9 @@ private:
     switchboard::writer<imu_raw_type> _m_imu_raw;
 
     std::vector<imu_type> _imu_vec;
+
+    int  _vio_cpu_core  = -1;
+    bool _affinity_set  = false;
 
     // std::vector<pose_type> filtered_poses;
 

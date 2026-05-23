@@ -27,7 +27,6 @@
 #include "illixr/phonebook.hpp"
 #include "illixr/pose_prediction.hpp"
 #include "illixr/relative_clock.hpp"
-#include "illixr/rl_data_logger.hpp"
 #include "illixr/shader_util.hpp"
 #include "illixr/switchboard.hpp"
 #include "illixr/threadloop.hpp"
@@ -57,7 +56,7 @@ const record_header mtp_record{"mtp_record",
                                    {"unix_start_ns", typeid(std::int64_t)},  ///< Unix timestamp when clock started
                                }};
 
-// Extended record for RL training - includes timing, frequency, and temperature
+// Extended record for RL training - frame and pipeline timing only.
 const record_header rl_frame_record{"rl_frame_record",
                                     {
                                         // Basic info
@@ -69,6 +68,7 @@ const record_header rl_frame_record{"rl_frame_record",
                                         {"cam_vio_to_display", typeid(std::chrono::nanoseconds)},
                                         {"predict_to_display", typeid(std::chrono::nanoseconds)},
                                         {"render_to_display", typeid(std::chrono::nanoseconds)},
+                                        {"fps_hz", typeid(double)},
 
                                         // Frame timing
                                         {"frame_start_time", typeid(time_point)},
@@ -85,12 +85,6 @@ const record_header rl_frame_record{"rl_frame_record",
                                         // Pipeline stage timing - VIO
                                         {"vio_start_time", typeid(time_point)},
                                         {"vio_end_time", typeid(time_point)},
-
-                                        // System state
-                                        {"cpu_freq_khz", typeid(std::uint64_t)},
-                                        {"gpu_freq_khz", typeid(std::uint64_t)},
-                                        {"cpu_temp_c", typeid(double)},
-                                        {"gpu_temp_c", typeid(double)},
                                     }};
 
 #ifdef ILLIXR_MONADO
@@ -277,6 +271,9 @@ private:
 
     // Logger for RL training data
     record_coalescer rl_frame_logger;
+
+    time_point _last_rl_vsync_time{};
+    bool       _has_last_rl_vsync_time{false};
 
     // Switchboard plug for sending hologram calls
     switchboard::writer<hologram_input> _m_hologram;
@@ -894,15 +891,22 @@ public:
 
         // Record frame end time
         time_point frame_end_time = _m_clock->now();
-
-        // Read system state (CPU/GPU frequency and temperature)
-        SystemStateReader::SystemState sys_state = SystemStateReader::read_system_state();
+        const time_point vsync_time = time_last_swap;
+        double fps_hz = 0.0;
+        if (_has_last_rl_vsync_time) {
+            const double frame_period_s = duration2double(vsync_time - _last_rl_vsync_time);
+            if (frame_period_s > 0.0) {
+                fps_hz = 1.0 / frame_period_s;
+            }
+        }
+        _last_rl_vsync_time = vsync_time;
+        _has_last_rl_vsync_time = true;
 
         // Log original mtp_record for backward compatibility
         mtp_logger.log(record{mtp_record,
                               {
                                   {iteration_no},
-                                  {_m_clock->now()},
+                                  {vsync_time},
                                   {imu_to_display},
                                   {cam_vio_to_display},
                                   {predict_to_display},
@@ -915,13 +919,14 @@ public:
                                     {
                                         // Basic info
                                         {iteration_no},
-                                        {_m_clock->now()},
+                                        {vsync_time},
 
                                         // Latency metrics
                                         {imu_to_display},
                                         {cam_vio_to_display},
                                         {predict_to_display},
                                         {render_to_display},
+                                        {fps_hz},
 
                                         // Frame timing
                                         {frame_start_time},
@@ -938,12 +943,6 @@ public:
                                         // VIO timing (from fast_pose_type in rendered_frame)
                                         {most_recent_frame->render_pose.vio_start_time},
                                         {most_recent_frame->render_pose.vio_end_time},
-
-                                        // System state
-                                        {sys_state.cpu_freq_khz},
-                                        {sys_state.gpu_freq_khz},
-                                        {sys_state.cpu_temp_c},
-                                        {sys_state.gpu_temp_c},
                                     }});
 
         // Force flush records to ensure they're written
