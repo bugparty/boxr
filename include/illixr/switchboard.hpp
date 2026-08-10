@@ -295,9 +295,11 @@ private:
         }
 
         void enqueue(ptr<const event>&& this_event) {
-            _m_queue_size++;
-            [[maybe_unused]] bool ret = _m_queue.enqueue(std::move(this_event));
-            assert(ret);
+            bool ret = _m_queue.enqueue(std::move(this_event));
+            if (!ret) {
+                throw std::runtime_error("Failed to enqueue switchboard buffered event");
+            }
+            _m_queue_size.fetch_add(1, std::memory_order_release);
         }
 
         size_t size() const {
@@ -306,8 +308,14 @@ private:
 
         ptr<const event> dequeue() {
             ptr<const event> obj;
-            _m_queue_size--;
-            _m_queue.wait_dequeue(_m_ctok, obj);
+            if (!_m_queue.try_dequeue(_m_ctok, obj)) {
+                return nullptr;
+            }
+            size_t previous_size = _m_queue_size.fetch_sub(1, std::memory_order_acq_rel);
+            if (previous_size == 0) {
+                _m_queue_size.store(0, std::memory_order_release);
+                throw std::logic_error("Switchboard buffered event count underflow");
+            }
             return obj;
         }
     };
@@ -523,7 +531,17 @@ public:
     public:
         buffered_reader(topic& topic)
             : _m_topic{topic}
-            , _m_tb{_m_topic.get_buffer()} { }
+            , _m_tb{_m_topic.get_buffer()} {
+            // Topic registration fixes the event type for the lifetime of the
+            // topic. Validate that contract once even in optimized builds, then
+            // avoid a per-event RTTI walk in dequeue().
+            if (typeid(specific_event) != _m_topic.ty()) {
+                throw std::runtime_error(
+                    "Buffered reader type does not match switchboard topic '" +
+                    _m_topic.name() + "'"
+                );
+            }
+        }
 
         size_t size() const {
             return _m_tb.size();
@@ -534,7 +552,8 @@ public:
             // serial_no));
             serial_no++;
             ptr<const event>          this_event          = _m_tb.dequeue();
-            ptr<const specific_event> this_specific_event = std::dynamic_pointer_cast<const specific_event>(this_event);
+            ptr<const specific_event> this_specific_event =
+                std::static_pointer_cast<const specific_event>(this_event);
             return this_specific_event;
         }
     };
